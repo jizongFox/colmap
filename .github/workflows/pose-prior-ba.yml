@@ -51,14 +51,26 @@ jobs:
             -DFETCH_FAISS=ON \
             -DFETCH_POSELIB=ON
 
-      - name: Build controller tests
+      - name: Build controller tests and CLI
         run: |
           cmake --build build --target \
+            colmap \
             colmap_controllers_database_pose_prior_bundle_adjustment_test \
             colmap_controllers_bundle_adjustment_test \
             -j2
 
+      - name: Verify native CLI options
+        run: |
+          build/src/colmap/exe/colmap bundle_adjuster -h \
+            | tee /tmp/bundle_adjuster_help.txt
+          grep -F 'BundleAdjustment.pose_prior_database_path' \
+            /tmp/bundle_adjuster_help.txt
+          grep -F 'BundleAdjustment.use_position_priors' \
+            /tmp/bundle_adjuster_help.txt
+          grep -F 'BundleAdjustment.use_rotation_priors' \
+            /tmp/bundle_adjuster_help.txt
+
       - name: Run tests
         run: |
           ctest --test-dir build --output-on-failure \
-            -R 'controllers_(database_pose_prior_bundle_adjustment|bundle_adjustment)_test'
+            -R 'controllers/(database_pose_prior_bundle_adjustment|bundle_adjustment)_test'

@@ -35,8 +35,8 @@
 #include "colmap/util/misc.h"
 #include "colmap/util/timer.h"
 
-#include <cstdlib>
 #include <filesystem>
+#include <stdexcept>
 
 namespace colmap {
 namespace {
@@ -66,7 +66,17 @@ class BundleAdjustmentIterationCallback : public ceres::IterationCallback {
 BundleAdjustmentController::BundleAdjustmentController(
     const OptionManager& options,
     std::shared_ptr<Reconstruction> reconstruction)
-    : options_(options), reconstruction_(std::move(reconstruction)) {}
+    : BundleAdjustmentController(options, {}, {}, std::move(reconstruction)) {}
+
+BundleAdjustmentController::BundleAdjustmentController(
+    const OptionManager& options,
+    DatabasePosePriorBundleAdjustmentOptions pose_prior_options,
+    std::filesystem::path pose_prior_database_path,
+    std::shared_ptr<Reconstruction> reconstruction)
+    : options_(options),
+      pose_prior_options_(pose_prior_options),
+      pose_prior_database_path_(std::move(pose_prior_database_path)),
+      reconstruction_(std::move(reconstruction)) {}
 
 void BundleAdjustmentController::Run() {
   THROW_CHECK_NOTNULL(reconstruction_);
@@ -97,22 +107,20 @@ void BundleAdjustmentController::Run() {
   }
 
   std::unique_ptr<BundleAdjuster> bundle_adjuster;
-  const char* database_path_env =
-      std::getenv("COLMAP_BUNDLE_ADJUSTER_DATABASE_PATH");
-  if (database_path_env != nullptr && database_path_env[0] != '\0') {
-    LOG(INFO) << "Using database position and quaternion rotation priors from "
-              << database_path_env;
-    DatabasePosePriorBundleAdjustmentOptions prior_options;
-    bundle_adjuster = CreateDatabasePosePriorBundleAdjuster(
-        ba_options,
-        prior_options,
-        std::move(ba_config),
-        std::filesystem::path(database_path_env),
-        *reconstruction_);
+  if (pose_prior_options_.Enabled()) {
+    LOG(INFO) << "Using database pose priors from " << pose_prior_database_path_
+              << " (position=" << pose_prior_options_.use_position_priors
+              << ", rotation=" << pose_prior_options_.use_rotation_priors
+              << ")";
+    bundle_adjuster =
+        CreateDatabasePosePriorBundleAdjuster(ba_options,
+                                              pose_prior_options_,
+                                              std::move(ba_config),
+                                              pose_prior_database_path_,
+                                              *reconstruction_);
     if (!bundle_adjuster) {
-      LOG(ERROR) << "Could not configure database pose-prior bundle "
-                    "adjustment.";
-      return;
+      throw std::runtime_error(
+          "Could not configure database pose-prior bundle adjustment.");
     }
   } else {
     // Fixing the gauge with two cameras leads to a more stable optimization

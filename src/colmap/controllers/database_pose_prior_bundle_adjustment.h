@@ -40,36 +40,39 @@
 
 namespace colmap {
 
-// Absolute camera pose prior read from the pose_priors table. The quaternion is
-// the COLMAP world-to-camera rotation. Rotation covariance is a 3x3 covariance
-// of the SO(3) tangent-space error in radians squared.
+// Absolute camera pose prior read from the pose_priors table. Components are
+// populated according to the enabled CLI constraints.
 struct DatabasePosePrior {
-  image_t image_id = kInvalidImageId;
+  data_t data_id;
+  bool has_position = false;
   Eigen::Vector3d position = Eigen::Vector3d::Zero();
   Eigen::Matrix3d position_covariance = Eigen::Matrix3d::Identity();
+  bool has_rotation = false;
   Eigen::Quaterniond rotation = Eigen::Quaterniond::Identity();
   Eigen::Matrix3d rotation_covariance = Eigen::Matrix3d::Identity();
 };
 
 struct DatabasePosePriorBundleAdjustmentOptions {
+  bool use_position_priors = false;
+  bool use_rotation_priors = false;
   double prior_position_fallback_stddev = 1.0;
   double prior_rotation_fallback_stddev_rad = 0.08726646259971647;  // 5 deg.
   double prior_position_loss_scale = 2.7955321496988725;
   double prior_rotation_loss_scale = 2.7955321496988725;
+
+  bool Enabled() const { return use_position_priors || use_rotation_priors; }
+  bool Check() const;
 };
 
-// Reads position, quaternion rotation, and their covariances from the existing
-// pose_priors table. The reader accepts rotation quaternion columns named
-// rotation, rotation_quaternion, rotation_prior, prior_qvec, or qvec, and
-// covariance columns named rotation_covariance,
-// rotation_prior_covariance, prior_qvec_covariance, or qvec_covariance.
+// Reads only the components enabled in options. Position priors are Cartesian
+// camera centers. Rotation priors are COLMAP world-to-camera quaternions in
+// qw, qx, qy, qz order.
 std::vector<DatabasePosePrior> ReadDatabasePosePriors(
     const std::filesystem::path& database_path,
     const DatabasePosePriorBundleAdjustmentOptions& options);
 
-// Creates a Ceres bundle adjuster with reprojection, absolute camera-center,
-// and absolute quaternion rotation residuals. Returns nullptr when the database
-// does not contain enough valid priors to establish a metric frame.
+// Creates a Ceres bundle adjuster with independently selectable absolute
+// camera-center and quaternion-rotation residuals.
 std::unique_ptr<BundleAdjuster> CreateDatabasePosePriorBundleAdjuster(
     const BundleAdjustmentOptions& options,
     const DatabasePosePriorBundleAdjustmentOptions& prior_options,

@@ -175,10 +175,27 @@ int RunAutomaticReconstructor(int argc, char** argv) {
 int RunBundleAdjuster(int argc, char** argv) {
   std::filesystem::path input_path;
   std::filesystem::path output_path;
+  std::filesystem::path pose_prior_database_path;
+  DatabasePosePriorBundleAdjustmentOptions pose_prior_options;
 
   OptionManager options;
   options.AddRequiredOption("input_path", &input_path);
   options.AddRequiredOption("output_path", &output_path);
+  options.AddDefaultOption("BundleAdjustment.pose_prior_database_path",
+                           &pose_prior_database_path);
+  options.AddDefaultOption("BundleAdjustment.use_position_priors",
+                           &pose_prior_options.use_position_priors);
+  options.AddDefaultOption("BundleAdjustment.use_rotation_priors",
+                           &pose_prior_options.use_rotation_priors);
+  options.AddDefaultOption("BundleAdjustment.prior_position_fallback_stddev",
+                           &pose_prior_options.prior_position_fallback_stddev);
+  options.AddDefaultOption(
+      "BundleAdjustment.prior_rotation_fallback_stddev_rad",
+      &pose_prior_options.prior_rotation_fallback_stddev_rad);
+  options.AddDefaultOption("BundleAdjustment.prior_position_loss_scale",
+                           &pose_prior_options.prior_position_loss_scale);
+  options.AddDefaultOption("BundleAdjustment.prior_rotation_loss_scale",
+                           &pose_prior_options.prior_rotation_loss_scale);
   options.AddBundleAdjustmentOptions();
   if (!options.Parse(argc, argv)) {
     return EXIT_FAILURE;
@@ -194,10 +211,26 @@ int RunBundleAdjuster(int argc, char** argv) {
     return EXIT_FAILURE;
   }
 
+  if (pose_prior_options.Enabled()) {
+    if (pose_prior_database_path.empty() ||
+        !ExistsFile(pose_prior_database_path)) {
+      LOG(ERROR) << "A valid `BundleAdjustment.pose_prior_database_path` is "
+                    "required when position or rotation priors are enabled.";
+      return EXIT_FAILURE;
+    }
+    if (!pose_prior_options.Check()) {
+      return EXIT_FAILURE;
+    }
+  } else if (!pose_prior_database_path.empty()) {
+    LOG(INFO) << "Pose-prior database path was provided, but both prior "
+                 "constraints are disabled. Running stock bundle adjustment.";
+  }
+
   auto reconstruction = std::make_shared<Reconstruction>();
   reconstruction->Read(input_path);
 
-  BundleAdjustmentController ba_controller(options, reconstruction);
+  BundleAdjustmentController ba_controller(
+      options, pose_prior_options, pose_prior_database_path, reconstruction);
   ba_controller.Run();
 
   reconstruction->Write(output_path);
