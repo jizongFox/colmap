@@ -29,10 +29,14 @@
 
 #include "colmap/controllers/bundle_adjustment.h"
 
+#include "colmap/controllers/database_pose_prior_bundle_adjustment.h"
 #include "colmap/estimators/bundle_adjustment_ceres.h"
 #include "colmap/sfm/observation_manager.h"
 #include "colmap/util/misc.h"
 #include "colmap/util/timer.h"
+
+#include <filesystem>
+#include <stdexcept>
 
 namespace colmap {
 namespace {
@@ -62,7 +66,17 @@ class BundleAdjustmentIterationCallback : public ceres::IterationCallback {
 BundleAdjustmentController::BundleAdjustmentController(
     const OptionManager& options,
     std::shared_ptr<Reconstruction> reconstruction)
-    : options_(options), reconstruction_(std::move(reconstruction)) {}
+    : BundleAdjustmentController(options, {}, {}, std::move(reconstruction)) {}
+
+BundleAdjustmentController::BundleAdjustmentController(
+    const OptionManager& options,
+    DatabasePosePriorBundleAdjustmentOptions pose_prior_options,
+    std::filesystem::path pose_prior_database_path,
+    std::shared_ptr<Reconstruction> reconstruction)
+    : options_(options),
+      pose_prior_options_(pose_prior_options),
+      pose_prior_database_path_(std::move(pose_prior_database_path)),
+      reconstruction_(std::move(reconstruction)) {}
 
 void BundleAdjustmentController::Run() {
   THROW_CHECK_NOTNULL(reconstruction_);
@@ -91,15 +105,33 @@ void BundleAdjustmentController::Run() {
   for (const image_t image_id : reconstruction_->RegImageIds()) {
     ba_config.AddImage(image_id);
   }
-  // Fixing the gauge with two cameras leads to a more stable optimization
-  // with fewer steps as compared to fixing three points.
-  // TODO(jsch): Investigate whether it is safe to not fix the gauge at all,
-  // as initial experiments show that it is even faster.
-  ba_config.FixGauge(BundleAdjustmentGauge::TWO_CAMS_FROM_WORLD);
 
-  // Run bundle adjustment.
-  std::unique_ptr<BundleAdjuster> bundle_adjuster =
-      CreateDefaultBundleAdjuster(ba_options, ba_config, *reconstruction_);
+  std::unique_ptr<BundleAdjuster> bundle_adjuster;
+  if (pose_prior_options_.Enabled()) {
+    LOG(INFO) << "Using database pose priors from " << pose_prior_database_path_
+              << " (position=" << pose_prior_options_.use_position_priors
+              << ", rotation=" << pose_prior_options_.use_rotation_priors
+              << ")";
+    bundle_adjuster =
+        CreateDatabasePosePriorBundleAdjuster(ba_options,
+                                              pose_prior_options_,
+                                              std::move(ba_config),
+                                              pose_prior_database_path_,
+                                              *reconstruction_);
+    if (!bundle_adjuster) {
+      throw std::runtime_error(
+          "Could not configure database pose-prior bundle adjustment.");
+    }
+  } else {
+    // Fixing the gauge with two cameras leads to a more stable optimization
+    // with fewer steps as compared to fixing three points.
+    // TODO(jsch): Investigate whether it is safe to not fix the gauge at all,
+    // as initial experiments show that it is even faster.
+    ba_config.FixGauge(BundleAdjustmentGauge::TWO_CAMS_FROM_WORLD);
+    bundle_adjuster =
+        CreateDefaultBundleAdjuster(ba_options, ba_config, *reconstruction_);
+  }
+
   bundle_adjuster->Solve();
   reconstruction_->UpdatePoint3DErrors();
 

@@ -29,9 +29,12 @@
 
 #pragma once
 
+#include "colmap/controllers/database_pose_prior_bundle_adjustment.h"
 #include "colmap/controllers/option_manager.h"
 #include "colmap/scene/reconstruction.h"
 #include "colmap/util/base_controller.h"
+
+#include <filesystem>
 
 namespace colmap {
 
@@ -40,11 +43,18 @@ class BundleAdjustmentController : public BaseController {
  public:
   BundleAdjustmentController(const OptionManager& options,
                              std::shared_ptr<Reconstruction> reconstruction);
+  BundleAdjustmentController(
+      const OptionManager& options,
+      DatabasePosePriorBundleAdjustmentOptions pose_prior_options,
+      std::filesystem::path pose_prior_database_path,
+      std::shared_ptr<Reconstruction> reconstruction);
 
   void Run();
 
  private:
   const OptionManager& options_;
+  DatabasePosePriorBundleAdjustmentOptions pose_prior_options_;
+  std::filesystem::path pose_prior_database_path_;
   std::shared_ptr<Reconstruction> reconstruction_;
 };
 
